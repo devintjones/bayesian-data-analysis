@@ -18,16 +18,18 @@ model {
 	alpha ~ normal(0,4);
 	beta ~ normal(10,100);
 
-	sigma[1,1] <- 4;
-	sigma[2,2] <- 100;
-	sigma[1,2] <- 10;
-	sigma[2,1] <- 10;
+	//sigma[1,1] <- 4;
+	//sigma[2,2] <- 100;
+	//sigma[1,2] <- 10;
+	//sigma[2,1] <- 10;
 
 
-	b_pre[1] <- alpha;
-	b_pre[2] <- beta;
-	b_prior ~ multi_normal(b_pre,sigma);
+	//b_pre[1] <- alpha;
+	//b_pre[2] <- beta;
+	//b_prior ~ multi_normal(b_pre,sigma);
 
 	// posterior
-	y_trials ~ bernoulli_logit(b_prior[1] + b_prior[2] * x_trials);
+	//y_trials ~ bernoulli_logit(b_prior[1] + b_prior[2] * x_trials);
+	y_trials ~ bernoulli_logit(alpha + beta * x_trials);
+
 }

@@ -1,0 +1,220 @@
+---
+title: 'Bayesian Data Analysis: HW3'
+author: "Devin Jones dj2374"
+date: "September 30, 2015"
+output: pdf_document
+header-includes: \usepackage{graphicx}
+---
+
+## Part 1 
+
+Suppose $y_{1},...,y_{5}$ are indpendent samples from a Cauchy distribution with unknown center $\theta$ and known scale 1. That is, $p(y_{i} | \theta) \propto \frac{1}{1 + (y_{i} - \theta)^{2}}$. Assume the prior distribution on $\theta$ is uniform on [0,1] and the observations on $y$ are (-2,-1,0,1.5,2.5).
+
+### A. Plot the posterior density
+
+The posterior density of $\theta$ follows $p( \theta | y) \propto p(y | \theta) p(\theta)$, where $p(\theta)=\frac{1}{1-0}=1$. Therefore, the posterior is proportional to the Cauchy distribution over the interval [0,1]. The density is shown in the visualization below. 
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center'}
+
+curve(dcauchy(x)/(.01*sum(dcauchy(x))),0,1,
+      ylim=c(0,1.3),ylab="P(theta|y)",xlab="Theta")
+title(main="Posterior Density of Theta")
+
+```
+
+### B. Determine the derivative and the second derivate of the log posterior density
+
+Posterior:
+$$p( \theta | y) \propto \frac{1}{1 + (y_{i} - \theta)^{2}} ,\theta \in[0,1]$$
+
+Log posterior:
+$$ l = log \space p( \theta | y) \propto -log( 1 - (y_{i} - \theta)^{2}) $$ 
+
+First derivative of log posterior:
+$$\frac{\partial l}{\partial \theta} = \frac{2(y_{i} - \theta)}{1 - (y_{i} - \theta)^{2}} $$
+
+Using the quotient rule for derivatives, the second derivative of log posterior:
+$$\frac{\partial ^{2} l}{\partial \theta^{2}} = \frac{-2(1- (y_{i} - \theta)^{2}) -4(y_{i} - \theta)(y_{i} - \theta)}{(1-(y_{i}-\theta)^{2})^{2}} $$
+$$\Rightarrow \frac{-2+ 2(y_{i} - \theta)^{2} -4(y_{i} - \theta)^{2}}{(1-(y_{i}-\theta)^{2})^{2}} $$
+$$\Rightarrow \frac{2(1 - (y_{i} - \theta)^{2})}{(1-(y_{i}-\theta)^{2})^{2}} $$
+
+
+which can be reduced to 
+$$\frac{\partial ^{2} l}{\partial \theta^{2}} = \frac{2}{1-(y_{i}-\theta)^{2})}$$
+
+
+
+### C. Find the posterior mode of $\theta$ by iteratively solving the equation determined by setting the derivative of the log-likelihood to zero.
+
+$$\Sigma \frac{\partial l }{\partial \theta} = \Sigma \frac{-2\theta}{1+\theta^{2}} = 0$$
+$$\Rightarrow \hat{\theta} = 0$$
+
+### D. Construct the normal approximation based on the second derivative of the log posterior density at the mode. Plot the approximate normal density and compare to the exact density computed in (A).
+
+The approximate normal density:
+
+$$p( \theta | y) \approx N(\hat\theta, [I(\hat\theta)]^{-1})$$
+
+where $I(\theta)$ is the observed information:
+$$I(\theta) = -\frac{d^2}{d\theta^{2}}log \space p(\theta|y)$$
+
+By this approximation, we have 
+$$p(\theta|y) \sim N(\bar{y},\frac{1-\bar{y}^{2}}{2})$$
+
+This function is plotted below:
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center'}
+y <- c(-2, -1, 0, 1.5, 2.5)
+curve(dnorm(x,0,(1-mean(y)**2)/2),0,1,ylim=c(0,1),ylab="P(theta|y)",xlab="Theta")
+title(main="Normal Approximation\nof the Posterior Density")
+
+```
+
+In comparison to the exact density plot in A, the shape is similar and the center is the same. However, the right side of the appoximation appears to approach zero faster than the exact computation. 
+
+## Part 2
+
+### A. Fit a model in Stan to estimate the effect of electromagnetic fields at different frequencies on calcium ions released from chicken brains. This question is of scientific interest, because if there is an effect, then it suggests that low-frequency electromagnetic fields can affect brain functioning.
+
+The data is described in more detail in the assignment, but in summary consists of two sets of mean ratios, standard errors, and sample sizes fore each observation of calcium ions released after exposure to a given frequency level. One of these sets of summary statistics is the ratio of an exposed observation to control, and the other is the ratio of a 'sham'. 
+
+To measure the effect of the treatment, both sets of observations can be parameterized seperately and compared after simulation. At first, the ratio effect of each group over each frequencies was considered to have a $student t(\eta,\sigma)$ distribution with degrees of freedome equal to the sample size. A prior distribution was placed on $\eta$ over all frequencies following $N(\mu,\sigma)$ where $\mu$ and $\sigma$ are unknown. 
+
+The resulting simulation of estimated exposed ratio to control ratio is shown below. The entire posterior distribution of the mean lies above zero, suggesting that there is a negative effect from electronic frequency exposure. 
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center',message=F}
+setwd('~/Desktop/school/bayesian-data-analysis/hw3')
+freqStats <- readRDS("freqStats.rds")
+readRDS("ratioPlot.rds")
+readRDS("meanPlot.rds")
+```
+
+
+The underlying ion emission in the numerator and denominator could also follow a normal distribution. If this is the case, the ratio of two normal random variables is a cauchy distribution. This probability model seemed to smooth the estimated frequency effects however the data did not fall within the 95% interval estimate. 
+
+
+### B. Is there evidence from the data that the effect is not constant across frequencies? Explain, and justify your answer quantitatively.
+
+There is indeed evidence that the effict is not constant across frequencies. When treating frequencies as constant and fitting the ratios with a student t distribution, the mean ratio of the exposed to control does not converge. This model treats the frequencies as constant and does not fit the data, suggesting there is variability across frqeuencies. 
+
+### C. What is the role of the “sham” treatment? Why is it performed at all?
+
+The data shows that the mean sham ratio not centered on zero, suggesting placing half of the brain in the chamber with no electronic treatment influences the ion emission compared placing the brain in water. This evidence could suggest that the control group (placing the brain in water) is not a reasonable baseline to compare against the exposed group, or that there are other variables in the experiment that are not accounted for such as remnant electronic frequencies from previous experiments or other instruments. 
+
+### D. Which is a better estimate of the treatment effect, the point observation of a ratio or the ratio of exposed to sham?
+
+The ratio of exposed to sham appears to capture the variability in the experiment better than just the ratio. Intuitively, this ratio of ratios should control for any difference in ion emissions between the exposure chamber and water. This is discussed in more detail in C. 
+
+\pagebreak
+
+### Appendix: Code
+
+#### Stan Model for Q2.A
+
+    data {
+      int N;
+      int N_e[N];
+      int N_s[N];
+      real mean_e[N];
+      real mean_s[N];
+      real<lower=0> se_e[N];
+      real<lower=0> se_s[N];
+      real freq[N];
+    }
+    parameters {
+      real freq_effect[N];
+      real sham_effect[N];
+      real mu;
+      real eta;
+      real<lower=0> sigma_e;
+      real<lower=0> sigma_s;
+    }
+    model {
+      sham_effect ~ normal(eta,sigma_s);
+      freq_effect ~ normal(mu,sigma_e);
+      for (i in 1:N){
+        mean_e[i] ~ student_t(N_e[i],freq_effect[i],se_e[i]);
+        mean_s[i] ~ student_t(N_s[i],sham_effect[i],se_s[i]);
+      }
+    }
+    generated quantities{
+      real ratio[N];
+      real mean_ratio;
+      mean_ratio <- mu ./ eta;
+      for(i in 1:N)
+        ratio[i] <- freq_effect[i] ./ sham_effect[i];
+    }
+
+
+```{r,eval=F}
+setwd('~/Desktop/school/bayesian-data-analysis/hw3')
+
+library(rstan)
+library(ggplot2)
+library(dplyr)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+y <- c(-2, -1, 0, 1.5, 2.5)
+data1 <- list(y=y,N=length(y))
+fit1 <- stan(file='hw3.1.stan',data=data1,iter=2000)
+plot(fit1)
+
+# 1.a) plot the posterior density
+curve(dcauchy(x)/(.01*sum(dcauchy(x))),0,1,ylim=c(0,1.3),ylab="P(theta|y)",xlab="theta")
+
+curve(log(dcauchy(x)/(.01*sum(dcauchy(x)))),0,1,ylab="P(theta|y)",xlab="theta")
+
+# 1.d)
+curve(dnorm(x,0,(1-mean(y)**2)/2),0,1,ylim=c(0,1),ylab="P(theta|y",xlab="Theta")
+
+
+# Q2
+
+chickens <- read.table('http://www.stat.columbia.edu/~gelman/bda.course/chickens.txt',header=T,skip=1)
+names(chickens) <- c('freq','N_s','mean_s','se_s','N_e','mean_e','se_e')
+head(chickens)
+
+library(ggplot2)
+ggplot(data=chickens,aes(x=freq,y=mean_e-mean_s)) + geom_point() + stat_smooth()
+
+data2   <- as.list(chickens)
+data2$N <- nrow(chickens)
+model2t  <- stan('hw3.2.t.stan',data=data2,iter=2000)
+print(model2t)
+plot(model2t)
+
+freq  <- extract(model2t)$freq_effect
+sham  <- extract(model2t)$sham_effect
+ratio <- extract(model2t)$ratio
+freqStats <- data.frame(
+  freqMeans = apply(freq,2,mean),
+  freqLower = apply(freq,2,function(x) quantile(x,prob=.025)),
+  freqUpper = apply(freq,2,function(x) quantile(x,prob=.975)),
+  shamMeans = apply(sham,2,mean),
+  shamLower = apply(sham,2,function(x) quantile(x,prob=.025)),
+  shamUpper = apply(sham,2,function(x) quantile(x,prob=.975)),
+  ratioMeans = apply(ratio,2,mean),
+  ratioLower = apply(ratio,2,function(x) quantile(x,prob=.025)),
+  ratioUpper = apply(ratio,2,function(x) quantile(x,prob=.975))
+  )
+freqStats <- within(freqStats, actualRatio<- chickens$mean_e/chickens$mean_s)
+saveRDS(freqStats,"freqStats.rds")
+
+ratioPlot <- ggplot(data=freqStats,aes(x=1:nrow(freqStats),y=actualRatio)) + 
+  geom_errorbar(aes(ymin=ratioLower,ymax=ratioUpper),width=.1) +
+  geom_point() +
+  xlab("Observation") +
+  ylab("Ratio: Observed & estimated interval") +
+  ggtitle("Ratio of Exposed ratio\n to Shame Ratio")
+saveRDS(ratioPlot,"ratioPlot.rds")
+
+meanRatio <- data.frame(meanRatio=extract(model2t)$mean_ratio) 
+meanPlot <- ggplot(meanRatio,aes(x=meanRatio)) + 
+  geom_histogram() +
+  xlab("Mean Effect of Treatment") +
+  ylab("") +
+  ggtitle("Posterior of the Mean Effect of Treatment")
+saveRDS(meanPlot,"meanPlot.rds")
+
+```
+

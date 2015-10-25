@@ -1,0 +1,370 @@
+---
+title: "Bayesian Data Analysis HW5"
+author: "Devin Jones dj2374"
+date: "October 14, 2015"
+output: pdf_document
+header-includes: \usepackage{graphicx}
+---
+
+## Part 1
+
+Consider the model $y_{j} \sim Binomial(n_{j},\theta_{j})$ where $\theta_{j} = logit^{-1}(\alpha + \beta x_{j})$, $j=1,...,J$; and with independent prior distributions, $\alpha \sim t_{4}(0,2^{2})$ and $\beta \sim t_{4}(0,1)$. Suppose $J=10$, $x_{j}\sim U(0,1)$, and $n_{j} \sim Poisson^{+}(5)$
+
+### A. Sample a dataset from the model.
+
+See appendix for implementation. 
+```{r,echo=F}
+J <- 10
+x <- runif(J,0,1)
+n <- rpois(J,5)
+
+df    <- 4
+alpha <- rt(1,4)*2/2
+beta  <- rt(1,4)*1/2
+
+library(boot)
+theta <- inv.logit(alpha + beta*x)
+
+y     <- rbinom(n,J,theta)
+
+```
+
+
+### B. Use rejection sampling to get 1000 independent posterior draws from (alpha,beta)
+
+The rejection sampling algorithm proceeeds in two steps: 
+First, sample at random from a distribution proportional to $g(\theta)$, such that g has a finite intergral, and the importance ratio $\frac{p(\theta|y)}{g(\theta)}$ has a known bound.
+
+Next, with probabilty $\frac{p(\theta|y)}{Mg(\theta)}$, accept $\theta$.
+
+For this procedure and probability model, $g(\theta)$ was taken to be Uniform on [0,1], and M as the max of $p(\theta|y)$. These parameters yeild the bivariate distribution plot below. 
+
+```{r,echo=F}
+# add scale parameter to distirubtion function
+dt.scaled <- function(x, m, s, df) dt((x-m)/s, df)/s
+
+# posterior sample for one set of alpha,beta
+sample.post <- function(alpha.star,beta.star){
+  p.alpha <- dt.scaled(alpha.star,0,2,4)
+  p.beta  <- dt.scaled(alpha.star,0,1,4)
+  theta   <- inv.logit( alpha.star +  beta.star * x)
+  p.y     <- dbinom(y,J,theta)
+  return (prod(p.y) * p.alpha * p.beta)
+}
+
+# sample from uniform selection of alpha and beta
+runs <- 200000
+rejection.samps <- data.frame(alpha.star = runif(runs,-10,10),
+                              beta.star  = runif(runs,-5,5))
+
+rejection.samps <- within(rejection.samps,prob <- mapply(sample.post,
+                                                         alpha.star,beta.star))
+# select those that less than the threshold
+accepted<- with(rejection.samps, runif(runs,0,1)*max(prob,na.rm = T) < prob)
+
+keepers <- rejection.samps[accepted,]
+```
+
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center'}
+library(ggplot2)
+ggplot(keepers,aes(alpha.star,beta.star)) + 
+  geom_point() + 
+  ylab('P(beta|y)') +
+  xlab('P(alpha|y)')+
+  ggtitle('Poster Distribution of P(alpha,beta|y)\nvia Rejection Sampling')
+```
+
+### C. Approximate the posterior density for (alpha,beta) by a normal centered at the posterior mode with covariance matrix fit to the curvature at the mode.
+
+This excersice is straightforward, which yieild the distribution plotted below. 
+
+```{r,echo=F}
+getMode <- function(RejectionSamples,cuts=100){
+  # returns string: (a,b]
+  modeRange <- names(sort(-table(cut(RejectionSamples,
+                                     breaks=seq(min(RejectionSamples),
+                                                max(RejectionSamples),
+                                                length.out = cuts)
+                                     )))[1])
+  # clean string and find midpoint
+  modeVal   <- sum(as.numeric(strsplit(gsub('\\(|]','',modeRange),',')[[1]]))/2
+  return(modeVal)
+}
+
+# find mode and covar
+alpha_mode <- getMode(keepers$alpha.star)
+beta_mode  <- getMode(keepers$beta.star)
+mu         <- c(alpha_mode,beta_mode)
+covar      <- cov(keepers[,c('alpha.star','beta.star')])
+
+# sample from bivariate normal
+library(mnormt)
+normalsim <- rmnorm(1000,mu,covar)
+```
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center'}
+normalsim <- as.data.frame(normalsim)
+names(normalsim) <- c("alpha.star","beta.star")
+ggplot(normalsim,aes(alpha.star,beta.star)) + 
+  geom_point() + 
+  ylab('P(beta|y)') +
+  xlab('P(alpha|y)')+
+  ggtitle('Poster Distribution of P(alpha,beta|y)\nvia Normal Approximation')
+```
+
+### D. Take 1000 draws from the two-dimensional t4 distribution with that center and scale matrix and use importance sampling to estimate E(alpha|y) and E(beta|y).
+
+Importance sampling follows the estimate
+
+$$E(h(\theta|y)=\frac{\frac{1}{S}\Sigma_{s=1}^{S}h(\theta^{s})w(\theta^{s})}{\frac{1}{S}\Sigma_{s=1}^{S}w(\theta^{s})}$$
+
+where $w$ is the importance weight function. Based on the text book, the importance weight function should be chosen such that $\frac{hq}{g}$ is relatively constant, where q is the unnormalized posterior density approximation. 
+
+For this excersize, $w$ was set to the ratio of the Uniform distribution function and a normal distribution centered at the mean of $q(\theta)$ with standard error equal to one fourth the range of the same estimation.
+
+```{r,echo=F}
+### sample from multi variate t using covar matrix
+tsim2 <- rmt(1000,mu,covar,4)
+
+### importance sampling
+importance.sample <- function(vec){
+  ## weight function: normal density
+  w <- dunif(vec,min(vec),max(vec))/dnorm(vec,mean(vec),sd=(max(vec)-min(vec))/4)
+  ## sampling function: samples from t distribution
+  h <- vec
+  return(mean(w*h)/mean(w))
+}
+
+data <- data.frame(e.alpha.y=importance.sample(tsim2[,1]),
+                   mean.alpha=mean(tsim2[,1]),
+                e.beta.y=importance.sample(tsim2[,2]),
+                mean.beta=mean(tsim2[,2]))
+
+names(data) <- c("E(alpha|y)","Mean(alpha)","E(beta|y)","Mean(beta)")
+library(knitr)
+kable(data)
+```
+
+
+## Part 2
+
+Consider the following discrete-data regression model: $y_{i}\sim Poisson(e^{X_{i}\beta}),i = 1,...,n$, with independent Cauchy prior distributions with location 0 and scale 2.5 on the elements of $\beta$.
+
+### A. Write a program in R to apply the Metropolis algorithm for beta given data X,y. Your program should work with any number of predictors (that is, X can be any matrix with the same number of rows as the length of y).
+
+The Metropolis algorithm initiates $\theta$ to feasible values such that $p(\theta^{0}|y)>0$ from an initial or pior distirubiton on $p(\theta)$. The uniform distribution of [-3,3] was used as a simple way to truncate the distribution to a prior belief about the parameters. 
+
+Then, for every iteration, $\theta^{*}$ is selected by some jumping distribution which must be symmetric. In this implementation, the jumping distriubtion of $N(0,.1)$ was chosen, which is symmetric and simmulates relatively small changes in $\theta$. 
+
+Using $\theta^{*}$, the relative increase in $p(\theta|y)$ is computed, and if this value increases, $\theta^{t}$ is set to $\theta^{*}$. Otherwise, $\theta^{*}$ is chosen with probability equal to the the ratio of posterior probabilities. 
+
+See implementation in the appendix. 
+
+
+### B. Simulate fake data from the model for a case with 50 data points and 3 predictors and run your program. Plot the posterior simulations from multiple chains and monitor convergence.
+
+The chart below shows beautiful convergence to the simulated parameters, [1,.5,-1]. All chains achived r values near 1. 
+
+However, this model acheive convergence only after simulating the data with feasible values of $\theta$.
+
+```{r,echo=F,fig.height=6,fig.width=7,fig.align='center',message=F}
+setwd('~/Desktop/school/bayesian-data-analysis/hw5')
+readRDS("metsims.RDS")  
+```
+
+\pagebreak
+
+### C. Fit the model in Stan and check that you get the same results.
+
+The same model simulated in stan also shows a similar convergence to the initial parameters. . It should be noted that the plot below does not include warm up iterations, while the plot above does. 
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center',message=F}
+readRDS("stansims.RDS")
+```
+
+
+
+## Appendix: Code
+
+### 1.A Simulate data from the model
+```{r,eval=F}
+J <- 10
+x <- runif(J,0,1)
+n <- rpois(J,5)
+
+df    <- 4
+alpha <- rt(1,4)*2/2
+beta  <- rt(1,4)*1/2
+
+library(boot)
+theta <- inv.logit(alpha + beta*x)
+
+y     <- rbinom(n,J,theta)
+
+```
+
+\pagebreak
+
+### Rejection sampling
+```{r,eval=F}
+# add scale parameter to distirubtion function
+dt.scaled <- function(x, m, s, df) dt((x-m)/s, df)/s
+
+# posterior sample for one set of alpha,beta
+sample.post <- function(alpha.star,beta.star){
+  p.alpha <- dt.scaled(alpha.star,0,2,4)
+  p.beta  <- dt.scaled(alpha.star,0,1,4)
+  theta   <- inv.logit( alpha.star +  beta.star * x)
+  p.y     <- dbinom(y,J,theta)
+  return (prod(p.y) * p.alpha * p.beta)
+}
+
+# sample from uniform selection of alpha and beta
+runs <- 200000
+rejection.samps <- data.frame(alpha.star = runif(runs,-10,10),
+                              beta.star  = runif(runs,-5,5))
+
+rejection.samps <- within(rejection.samps,prob <- mapply(sample.post,
+                                                         alpha.star,beta.star))
+# select those that less than the threshold
+accepted<- with(rejection.samps, runif(runs,0,1)*max(prob,na.rm = T) < prob)
+
+keepers <- rejection.samps[accepted,]
+```
+
+### Find mode & covariance, normal approximation
+```{r,eval=F}
+getMode <- function(RejectionSamples,cuts=100){
+  # returns string: (a,b]
+  modeRange <- names(sort(-table(cut(RejectionSamples,
+                                     breaks=seq(min(RejectionSamples),
+                                                max(RejectionSamples),
+                                                length.out = cuts)
+                                     )))[1])
+  # clean string and find midpoint
+  modeVal   <- sum(as.numeric(strsplit(gsub('\\(|]','',modeRange),',')[[1]]))/2
+  return(modeVal)
+}
+
+# find mode and covar
+alpha_mode <- getMode(keepers$alpha.star)
+beta_mode  <- getMode(keepers$beta.star)
+mu         <- c(alpha_mode,beta_mode)
+covar      <- cov(keepers[,c('alpha.star','beta.star')])
+
+# sample from bivariate normal
+library(mnormt)
+normalsim <- rmnorm(1000,mu,covar)
+```
+
+### Importance Sampling
+
+```{r,eval=F}
+### sample from multi variate t using covar matrix
+tsim2 <- rmt(1000,mu,covar,4)
+
+### importance sampling
+importance.sample <- function(vec){
+  ## weight function: normal density
+  w <- dunif(vec,min(vec),max(vec))/dnorm(vec,mean(vec),sd=(max(vec)-min(vec))/4)
+  ## sampling function: samples from t distribution
+  h <- vec
+  return(mean(w*h)/mean(w))
+}
+
+data <- data.frame(e.alpha.y=importance.sample(tsim2[,1]),
+                   mean.alpha=mean(tsim2[,1]),
+                e.beta.y=importance.sample(tsim2[,2]),
+                mean.beta=mean(tsim2[,2]))
+
+names(data) <- c("E(alpha|y)","Mean(alpha)","E(beta|y)","Mean(beta)")
+library(knitr)
+kable(data)
+```
+
+
+### Metropolis Implementation
+```{r}
+metropolis <- function(X,y,iter=500,chains=4){
+  
+  N <- nrow(X)
+  M <- ncol(X)
+
+  computePbeta.y <- function(beta.val){
+    # calc p(y|beta) & p(beta)
+    py.beta <- dpois(y, exp(X %*% beta.val) )
+    #py.beta[which(py.beta==0)] <- NA
+    p.beta  <- dcauchy(beta.val,0,2.5)
+    # p(beta|y) propto the product:
+    return(sum(log(py.beta),na.rm = T)+sum(log(p.beta)))
+  }
+
+ compute.new.beta <- function(beta.init){
+    
+    dens.init <- computePbeta.y(beta.init)
+    
+    # random walk to next potential beta
+    beta.star <- beta.init + rnorm(M,0,.1)
+    while(any(exp(X%*%beta.star)<=0)){
+      beta.star <- beta.star + rnorm(M,0,.1)
+    }
+    
+    # compute new density
+    dens.star <- computePbeta.y(beta.star)
+    
+    r <- exp(dens.star - dens.init)
+    
+    if( runif(1) < min(1,r) ){
+      beta.new <- beta.star 
+    }else{
+      beta.new <- beta.init
+    }
+    return(list(beta=beta.new,r=r))
+  }
+
+  chain <- function(beta){
+    results <- list(beta=beta,r=NA)
+    new.beta <- list(beta=beta)
+    for(i in 1:iter){
+      new.beta     <- compute.new.beta(new.beta$beta)
+      results$beta <- rbind(results$beta,new.beta$beta)
+      results$r    <- rbind(results$r,new.beta$r)
+    }
+    return(results)
+  }
+  
+  init.betas <- lapply(1:chains,function(x) {
+    beta.init <- runif(M,-3,3)
+    while(any(dpois(y,exp(X%*%beta.init)) <= 0)){
+      beta.init <- beta.init + rnorm(M,0,.1)
+    }
+    return(beta.init)
+    })
+  
+  require(parallel)
+  results <- lapply(init.betas,chain)
+  return(results)
+}
+
+```
+
+## Corresponing Stan Model
+
+```{r,eval=F}
+data{
+  int N;
+  int M;
+	matrix[N,M] X;
+	int y[N];
+}
+parameters{
+  vector[M] betas;
+}
+model{
+  for(i in 1:M)
+    betas[i] ~ cauchy(0,2.5);
+  for(i in 1:N)
+    y[i] ~ poisson(exp(X[i]*betas));
+}
+```

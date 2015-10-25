@@ -1,0 +1,364 @@
+---
+title: "Bayesian Data Analysis HW6"
+author: "Devin Jones dj2374"
+date: "October 21, 2015"
+output: pdf_document
+header-includes: \usepackage{graphicx}
+---
+
+## Program HMC in R for the bioassay logistic regression example from Chapter 3.
+
+### The model
+
+The bioassay example is paramterized a logistic regression model, such that the distribution of the number of deaths is given as $y_{i} | \theta_{i} \sim Bin(n_{i}|\theta_{i})$ where n is the number of trials. A transformatin on $\theta_{i}$ can be modeled as $logit(\theta_{i}) = \alpha + \beta x$ where $\alpha$ is a baseline and $\beta$ is the transformed effect of dosage, $x$. This yeilds the data likelihood model
+
+$$p(y_{i} | \alpha, \beta,n_{i},x_{i}) \propto [logit^{-1}(\alpha + \beta x_{i})]^{y_{i}} [1-logit^{-1}(\alpha + \beta x_{i})]^{n_{i} - y_{i}}$$
+
+The data and the model can be transformed such that instead of grouped observations for dosage and counts of deaths, we use y as a binary response and set n above to 1. 
+
+The joint posterior of $\alpha$, $\beta$:
+
+$$p(\alpha,\beta|y,x) \propto p(\alpha,\beta) \prod_{i=1}^n p(y_{i}|\alpha,\beta,x_{i})$$
+
+Independet normal prior distributions were placed on $\alpha$ and $\beta$, following $N(1,1)$ and $N(10,10)$ respectively. Because $\alpha$ and $\beta$ are assumed to be independent, $p(\alpha,\beta)=p(\alpha)p(\beta)$.
+
+
+### The gradients
+
+The gradient of the log likelihood was then taken as:
+
+Let $p(x) = \frac{1}{1+e^{-(\alpha + \beta x)}} = \frac{e^{(\alpha + \beta x)}}{1+(\alpha + \beta x)}$
+
+We have the simplified likelihood function  $p(y_{i}|\alpha,\beta,x_{i})=\prod_{i=1}^np(x_{i})^{y_{i}}(1-p(x_{i})^{1-y_{i}})$
+$$\ell=\sum_{i=1}^n y_{i}\space log \space p(x_{i}) + (1-y_{i})log(1-p(x_{i}))$$
+$$=\sum_{i=1}^nlog(1-p(x_{i})) + \sum_{i=1}^n y_{i}\space log \frac{p(x_{i})}{1-p(x_{i})} $$
+$$=\sum_{i=1}^nlog(1-p(x_{i})) + \sum_{i=1}^n y_{i}(\alpha+\beta x_{i})$$
+$$=\sum_{i=1}^n-log(1+e^{\alpha+\beta x_{i}})) + \sum_{i=1}^n y_{i}(\alpha+\beta x_{i})$$
+
+then,
+
+$$\frac{\partial\ell}{\partial\beta}=-\sum_{i=1}^n\frac{e^{\alpha+\beta x_{i}}}{1+e^{\alpha+\beta x_{i}}}x_{i} + \sum_{i=1}^n y_{i}x_{i}$$
+$$=\sum_{i=1}^n (y_{i}-p(x_{i}))x_{i}$$
+
+The derivative with respect to alpha is similar, but $x_{i}=1$ for all $i$. 
+
+The priors on the paramters are normal; the derivation of the gradient log prior is relatively straightforward:
+
+$$p(\alpha) = \frac{1}{\sigma\sqrt{2\pi}}e^{\frac{1}{2\pi\sigma^2}(\alpha^*-alpha)^2}$$
+$$log \space p(\alpha) = -log \space \sigma\sqrt{2\pi}+\frac{ (\alpha^*-alpha)^2}{2\space \pi\sigma^2}$$
+$$\frac{\partial log \space p(\alpha)}{\partial \alpha} = \frac{ (\alpha^*-alpha)}{\space \pi\sigma^2}$$
+
+The analytical derivation of these gradients was confirmed by comparing their implementation in R to the numerical gradient. See the appendix for implementation. 
+
+### Tuning HMC
+
+The mass matrix, $M$, was set to a diagonal matrix with the scale of $\alpha$ and $\beta$ as the scale valules, 2 and 10. The step size $e$ was set to .05, and $L=1/e$. Based on chapter 12, these are default initial paramters for HMC. 
+
+Initial acceptance rate was slightly above the optimal acceptance rate of 65%: [0.76, 0.788, 0.768, 0.772], the acceptance rate of each chain. To achieve an optimal accpetance rate, e was increased iteravely to 0.85. 
+
+In order to achieve a effect sample size of at least 100 for $\beta$, HMC had to run for 800 iterations. Derivations for effective sample size are based on estimated variance within each chain while accounting for autocorrelation. Implentatoin of this metric and $\hat{R}$, the measure of convergence, are in the appendix. 
+
+However, at these settings, the chaines were far from mixing over $\beta$ with $\hat{R}=1.66$. Convergence was achieved in two ways: first, by setting $e=0.2$ and keeping iterations around 1000. This approach unfortunately contributed to a sub-optimal acceptance rate of 75%. Second, convergence was achieved by increasing the number of iterations. Running 1500 iterations yielded an $\hat{R}_{\beta}$ of 1.09, below the acceptable threshold of 1.2. Further convergence was reached under the optimal $e$ if HMC ran for 20,000 iterations yeilding the following statistics: $\hat{R}_{\alpha} = 1.00$, $\hat{R}_{\alpha} = 1.02$, and acceptance rate = 0.649.
+
+
+### Comparison to Direct Approach
+
+This implementation of HMC yeilded similar results to the direct approach. The posterior distribution of LD50 has approximately the same scale and mean, but has less kurtosis because of the number of iterations run for this simulation. 
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center',message=F}
+require(ggplot2)
+results2 <- readRDS('resultsMany.rds')
+plotData <- as.data.frame(do.call('rbind',lapply(1:length(results2), function(i) results2[[i]]$thetas)))
+names(plotData) <- c('alpha','beta')
+plotData <- within(plotData,LD50 <- -alpha/beta)
+
+ggplot(data=plotData,aes(x=LD50)) + 
+  geom_histogram(binwidth=.02) +xlim(-.5,.4) + 
+  ggtitle("Posterior Simulation\nof LD50") +
+  ylab('') +
+  xlab('LD50 Dosage (log scale)')
+
+```
+
+Similarly, all simulated values of $\beta$, the effect of dosage on the probability of death, remain above zero. This implies that the drug is harmful with extremely high probability. Both simulations yield a left skewed distribution with a mode of approximately 7. 
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center',message=F}
+
+ggplot(data=plotData,aes(x=beta)) + 
+  geom_histogram() + 
+  ggtitle("Posterior Simulation\nBeta, the effect of Dosage") +
+  ylab('') +
+  xlab('Simulated Values of Beta\nThe inverse logit of the effect of log(dosage)\non probality of response')
+
+```
+
+
+## Apendix: Code
+
+### Distributions and Gradients
+
+```{r,eval=F}
+# log probability of y given params
+log.prob.y <- function(x,y,alpha,beta){
+    sum(-log(1+exp(alpha+x*beta))) + sum(y*(alpha+x*beta))
+}
+
+# derivative of log prob wrt alpha
+d.alpha.log.prob.y <- function(x,y,alpha,beta){
+  sum(y-inv.logit(alpha+beta*x))
+}
+
+# derivative of log prob wrt beta
+d.beta.log.prob.y <- function(x,y,alpha,beta){
+  sum((y-inv.logit(alpha+beta*x))*x)
+}
+
+# normal. used for alpha, beta
+log.prob.normal <- function(mu.star,mu.prior,sigma.prior){
+  log(dnorm(mu.star,mu.prior,sigma.prior))
+}
+d.mu.log.prob.normal <- function(mu.star,mu.prior,sigma.prior){
+  (1/(sigma.prior**2))*(mu.prior-mu.star)
+}
+d.sigma.log.prob.normal <- function(mu.star,mu.prior,sigma.prior){
+  -1/(sigma.prior)+(1/(sigma.prior**3))*(mu.star-mu.prior)**2
+}
+
+mu.star <- .5
+mu.prior <- 0
+sigma.prior <-.5
+# test normal drivative wrt mean
+(log.prob.normal(mu.star,mu.prior,sigma.prior) - 
+  log.prob.normal(mu.star,mu.prior+eps,sigma.prior))/eps
+d.mu.log.prob.normal(mu.star,mu.prior+eps/2,sigma.prior)
+
+# test normal derivative wrt sigma
+(log.prob.normal(mu.star,mu.prior,sigma.prior) -
+  log.prob.normal(mu.star,mu.prior,sqrt(sigma.prior**2-eps)))/eps
+d.sigma.log.prob.normal(mu.star,mu.prior,sqrt(sigma.prior**2-eps/2))
+
+
+# test that derivative formulas are correct
+alpha <- .5
+beta <- 1
+eps <- 0.0001
+
+## test alpha
+numerical.alpha  <- (log.prob.y(x,y,alpha,beta) - log.prob.y(x,y,alpha-eps,beta))/eps
+analytical.alpha <- d.alpha.log.prob.y(x,y,alpha-eps/2,beta)
+if(abs(numerical.alpha-analytical.alpha)>.001) stop("alpha derivative is wrong")
+
+## test beta
+numerical.beta  <- (log.prob.y(x,y,alpha,beta) - log.prob.y(x,y,alpha,beta-eps))/eps
+analytical.beta <- d.beta.log.prob.y(x,y,alpha,beta-eps/2)
+if(abs(numerical.beta-analytical.beta)>.001) stop("beta derivative is wrong")
+
+
+# total posterior
+alpha.prior.mu    <- .8
+alpha.prior.sigma <- 1
+beta.prior.mu     <- 7.7
+beta.prior.sigma  <- 4.9
+
+posterior <- function(x,y,alpha,beta){
+  log.prob.y(x,y,alpha,beta) + 
+    log.prob.normal(alpha,alpha.prior.mu,alpha.prior.sigma) +
+    log.prob.normal(beta,beta.prior.mu,beta.prior.sigma)
+}
+
+# total posterior gradient wrt alpha
+d.post.alpha <-function(x,y,alpha,beta){
+  d.alpha.log.prob.y(x,y,alpha,beta) +
+    d.mu.log.prob.normal(alpha,alpha.prior.mu,alpha.prior.sigma)
+}
+
+# test
+(posterior(x,y,alpha,beta) - posterior(x,y,alpha-eps,beta))/eps
+d.post.alpha(x,y,alpha-eps/2,beta)
+
+# total posterior gradient wrt beta
+d.post.beta <-function(x,y,alpha,beta){
+  d.beta.log.prob.y(x,y,alpha,beta) +
+    d.mu.log.prob.normal(beta,beta.prior.mu,beta.prior.sigma)
+}
+
+# test
+(posterior(x,y,alpha,beta) - posterior(x,y,alpha,beta-eps))/eps
+d.post.beta(x,y,alpha,beta-eps/2)
+
+
+# gradient used in HMC
+d.log.p.theta <- function(x,y,alpha,beta){
+  c(d.post.alpha(x,y,alpha,beta),d.post.beta(x,y,alpha,beta))
+}
+```
+
+## HMC Implementation
+
+```{r,eval=F}
+e   <- .85
+L   <- round(1/e)
+
+M <- diag(x=c(2,10))
+alpha.prior.sigma <- 2
+beta.prior.sigma  <- 10
+alpha.prior.mu    <- 1
+beta.prior.mu     <- 10
+
+library(parallel)
+results <- mclapply(1:4,function(x) HMC.chain(M,e,L,iter=20000))
+
+
+HMC.chain <- function(M,e,L,iter=1000){
+  theta <- init.theta(alpha.prior.mu,alpha.prior.sigma,beta.prior.mu,beta.prior.sigma)
+  thetas <- c()
+  accepts <- 0
+  for(i in 1:iter){
+    e.star <- runif(1,0,2*e)
+    L.star <- runif(1,1,round(2*L))
+    params <- HMCiter(theta,M,e.star,L.star)
+    theta  <- params$theta
+    
+    if(i > iter/2){
+      thetas <- rbind(thetas,theta)
+      accepts <- accepts + params$accept
+    }
+  }
+  acceptance <- accepts/(iter/2)
+  return(list(thetas=thetas,avg.acceptance=acceptance))
+}
+
+HMCiter <- function(theta,M,e,L){
+  theta.init <- theta
+  phi        <- phi.init <- init.phi(M)
+  vars       <- getDiag(M)
+  
+  i <- 1
+  while(i<=L){
+    phi   <- phi   + .5*e*d.log.p.theta(x,y,theta[1],theta[2])
+    theta <- theta + e*phi/vars
+    phi   <- phi   + .5*e*d.log.p.theta(x,y,theta[1],theta[2])
+    i <- i+1
+  }
+
+  # diff of log posterior probs
+  r <- exp(post.theta.phi(x,y,theta,phi,vars) -
+             post.theta.phi(x,y,theta.init,phi.init,vars))
+  if(min(r,1) > runif(1)){
+    theta.new <- theta
+    accept <- 1
+  }else{
+    theta.new <- theta.init
+    accept <- 0
+  }
+  return(list(theta=theta.new,r=r,accept=accept,phi=phi))  
+}
+
+
+### helper functions
+getDiag <- function(mat){
+  unlist(lapply(1:ncol(mat), function(i) mat[i,i]))
+}
+
+# init M and phi
+M <- diag(c(alpha.prior.sigma,beta.prior.sigma))
+#M <- diag(c(1,2))
+init.phi <- function(M){
+  unlist(lapply(1:ncol(M),function(i) rnorm(1,0,M[i,i])))
+}
+init.theta <- function(alpha.prior.mu,alpha.prior.sigma,beta.prior.mu,beta.prior.sigma){
+  c(runif(1,alpha.prior.mu-.5,alpha.prior.mu +.5),runif(1,beta.prior.mu-2,beta.prior.mu+2))
+}
+
+post.theta.phi <- function(x,y,theta,phi,vars){
+  posterior(x,y,theta[1],theta[2]) + 
+    log(dnorm(phi[1],0,vars[1])) + 
+    log(dnorm(phi[2],0,vars[2]))
+}
+
+printResults <- function(results){
+  cat('rhat for alpha:',rhat(results,1),
+      '\nrhat for beta:',rhat(results,2),
+      '\nneff alpha:',neff(results,1),
+      '\nneff beta:',neff(results,2),
+      '\nacceptance rate:',paste(lapply(1:4,function(i) results[[i]]$avg.acceptance),collapse=' '))
+}
+
+plotResults <- function(results){
+  plotData <- as.data.frame(do.call('rbind',lapply(1:length(results), function(i) results[[i]]$thetas)))
+  names(plotData) <- c('alpha','beta')
+  require(reshape2)
+  plotData <- melt(plotData)
+  head(plotData)
+  ggplot(plotData,aes(x=value)) +
+    geom_histogram()+
+    facet_wrap(~variable,nrow = 2) +
+    ggtitle("Posterior Distribution of alpha, beta")
+}
+
+```
+
+### Rhat and Effective Sample Size
+
+```{r}
+
+# compute rhat
+rhat <- function(results,beta.idx=1){
+  m <- length(results)
+  n <- nrow(results[[1]]$thetas)
+  chain.sims <- function(i) results[[i]]$thetas[,beta.idx]
+  
+  mean.sims  <- mean(unlist(lapply(1:m,function(i) mean(chain.sims(i)))))
+  
+  # deviance of mean of chain from mean of means of chains
+  B <- n/(m-1)*sum(unlist(lapply(1:m, function(i) (mean(chain.sims(i)) - mean.sims)**2)))
+  
+  # mean standard deviation of chains
+  W <- mean(unlist(lapply(1:m,function(i) sd(chain.sims(i)))))
+  
+  var.phi <- (n-1)/n*W + (1/n)*B
+  
+  rhat <- sqrt(var.phi/W)
+  return(rhat)
+}
+
+
+# for use in autocorelation calcs
+lag_ <- function(x,k=0) c(rep(NA, k), x)[1 : length(x)] 
+
+# effective sample size for a cahing given m chains, n iters
+neff <- function(results,beta.idx){
+  m <- length(results)
+  n <- nrow(results[[1]]$thetas)
+  chain.sims <- function(i) results[[i]]$thetas[,beta.idx]
+  
+  mean.sims  <- mean(unlist(lapply(1:m,function(i) mean(chain.sims(i)))))
+  
+  # deviance of mean of chain from mean of means of chains
+  B <- n/(m-1)*sum(unlist(lapply(1:m, function(i) (mean(chain.sims(i)) - mean.sims)**2)))
+  
+  # mean standard deviation of chains
+  W <- mean(unlist(lapply(1:m,function(i) sd(chain.sims(i)))))
+  
+  # var beta|y
+  var.psi <- (n-1)/n*W + (1/n)*B
+  
+  # variogram t
+  v.t <- function(t){
+    (1/(m*(n-1)))*sum(unlist(lapply(1:m, function(m){ 
+      sum(((lag_(chain.sims(m),t)-chain.sims(m))**2)[(t+1):n])
+    })))
+  }
+  
+  # correlation at t
+  rho.t <- function(t) 1 - (v.t(t)/(2*var.psi))
+  
+  # correaltions over all t
+  rhos <- unlist(lapply(1:(n-1), function(t) rho.t(t)))
+  
+  # effective sample size
+  neff <- m*n/(1 + 2*sum(rhos[1:which.max(lag_(rhos)+rhos<0)]))
+  
+  return(neff)
+}
+```

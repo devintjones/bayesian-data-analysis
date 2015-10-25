@@ -1,0 +1,388 @@
+---
+title: 'Bayesian Data Analysis: HW3'
+author: "Devin Jones dj2374"
+date: "September 24, 2015"
+output: pdf_document
+---
+
+## Part 1
+### A. Fit the effect of viewing the TV viewing program. Give uncertainty intervals for all point estimates. 
+
+The effect of the TV viewing program can be modeled as two T distributions, one distrubtion is used to parameterize the score before watching the program, and another to parameterize the effect after. Finally, to understand the effect of the TV viewing program, the difference between each of these simulated distributions is considered. 
+
+The following model captures the above situation:
+
+    data {
+    	int N;
+    	vector[N] cPost;
+    	vector[N] cPre;
+    	vector[N] ePost;
+    	vector[N] ePre;
+    }
+    transformed data {
+    	vector[N] cdiff;
+    	vector[N] ediff;
+    	
+    	cdiff <- cPost - cPre;
+    	ediff <- ePost - ePre;
+    }
+    parameters {
+    	real meanC;
+    	real meanE;
+    	real<lower=0> seC;
+    	real<lower=0> seE;
+    }
+    model {
+    	for(i in 1:N)
+    		cdiff[i] ~ student_t(N, meanC, seC);
+    	for(i in 1:N)
+    		ediff[i] ~ student_t(N, meanE, seE);
+    }
+    generated quantities {
+    	vector[N] tdiff;
+    	tdiff <- ediff - cdiff;
+    }
+
+To understand the difference in the effect across grades and cities, we can simply subset the data for each factor and simulate the model. The summary statistics as well as a visualization of this simulation are presented below. 
+
+The mean values and intervals across grades suggest TV viewership program has a negative relationship with the age of the students. That is, the younger students were more heavily impacted by the TV viewer program. Additionally while the program seems to have a stronger effect on younger students, the outcome was more sporadic or variable. This inference can be drawn from the spread in the 95% interval estimates. 
+
+The strong impact of the TV viewership program on first graders could also be attributed to the type of test they were given. The background of the assignment suggests that the grade 1 students had an easier test than the other grades before enrolling in the TV viewership program. Because of this flaw in the experimental design, the grade 1 students cannot be compared to the other grades. 
+
+While a notable inference can be drawn from the grade level of the students, the city cohorts seem to have had a similar effect from the program. Both cities share a likely postive impact, with a smaller chance of having no impact at all.  
+
+```{r,echo=F}
+library(knitr)
+library(ggplot2)
+setwd('~/Desktop/school/bayesian-data-analysis/hw2')
+stats <- readRDS("summaryStats.rds")
+names(stats) <- c('Factor','Mean Effect','Effect .025%','Effect .975%')
+kable(stats)
+readRDS("facetPlot.rds")
+```
+
+\pagebreak
+
+### B. Check that the data satisfy any assumptions made in your analysis. 
+
+The above analysis was conducted under the assumption that the selection of the TV viewing program as a suppliment or replacement was conducted at random. This does not seem to be the case; the program was added as a suppliment more frequently in every factor that was considered. This implies that our estimates and simulations are biased toward the suppliment effect, which, based on summary statistics, appears to contribute to variability in the data when mixed with other factors.
+
+
+\begin{center}
+\textbf{Summary Statistics by Program Type}
+\end{center}
+
+```{r,echo=FALSE,message=F}
+data <- read.table("http://www.stat.columbia.edu/~gelman/bda.course/electric.txt",skip=2)
+names(data) <- c("city","grade","ePre","ePost","cPre","cPost","replace.suppliment")
+
+library(dplyr)
+
+
+suppliment <-  data %>% 
+    mutate(ediff=ePost-ePre,
+         cdiff=cPost-cPre,
+         tdiff=ediff-cdiff) %>%
+  group_by(replace.suppliment) %>% 
+  summarize(count=n(),
+            tdiffmean = mean(tdiff),
+            tdiffse   = sd(tdiff)/sqrt(n()),
+            tdiffLower= tdiffmean + qt(.975,n()-1)*tdiffse,
+            tdiffUpper= tdiffmean - qt(.975,n()-1)*tdiffse)
+names(suppliment) <- c('Program Type','N','Effect Mean','Effect S.E.','Effect .025% Int','Effect .975% Int')
+kable(suppliment)
+```
+
+\begin{center}
+\textbf{Summary Statistics by Grade, Program Type}
+\end{center}
+
+
+```{r,echo=FALSE,message=F}
+summarizedGrade <- data %>% 
+  mutate(ediff=ePost-ePre,
+         cdiff=cPost-cPre,
+         tdiff=ediff-cdiff) %>%
+  group_by(grade,replace.suppliment) %>% 
+  summarise(count=n(),
+            tdiffmean = mean(tdiff),
+            tdiffse   = sd(tdiff)/sqrt(n()),
+            tdiffLower= tdiffmean + qt(.975,n()-1)*tdiffse,
+            tdiffUpper= tdiffmean - qt(.975,n()-1)*tdiffse)
+names(summarizedGrade) <- c('Grade','Program Type','N','Effect Mean','Effect S.E.','Effect .025% Int','Effect .975% Int')
+
+kable(summarizedGrade)
+```
+
+\begin{center}
+\textbf{Summary Statistics by City, Program Type}
+\end{center}
+
+```{r,echo=FALSE,message=F}
+summarizedCity <- data %>% 
+  mutate(ediff=ePost-ePre,
+         cdiff=cPost-cPre,
+         tdiff=ediff-cdiff) %>%
+  group_by(city,replace.suppliment) %>% 
+  summarise(count=n(),
+            tdiffmean = mean(tdiff),
+            tdiffse   = sd(tdiff)/sqrt(n()),
+            tdiffLower= tdiffmean + qt(.975,n()-1)*tdiffse,
+            tdiffUpper= tdiffmean - qt(.975,n()-1)*tdiffse)
+names(summarizedCity) <- c('City','Program Type','N','Effect Mean','Effect S.E.','Effect .025% Int','Effect .975% Int')
+kable(summarizedCity)
+```
+
+### C. Discuss what can be done with the non ranomized part of the experiment
+
+As discussed above, the suppliment program was chosen more frequently than the replacement program. To model the effect of this factor, interaction terms could be included in the model. These interaction terms could be used to infer the impact of not only the TV viewer program but on the amount of material. 
+
+A large difference in pre and post tests could infer that the curriculum strategy is ideal for a specific age group and city. For example, younger students might only have the capacity for one curriculum, while the older students might be able to absorb more material because they are more mature and developed.
+
+\pagebreak
+
+## Part 2
+
+### A. Fit the bioessay model from 3.7 in stan with a joint nomarl prior on the parameters & 0.05 correlation between them. 
+
+The logistic regression model can be paramterized easily in Stan. There are also simple facilities ot sample form a joint normal distribution by specifying a covariance matrix with the parameters supplied in the question. The Stan model is shown below. 
+
+    data {
+    	int J;
+    	vector[J] x_trials;
+    	int<lower=0,upper=1> y_trials[J];
+    }
+    parameters {
+    	real<lower=-5,upper=10> alpha;
+    	real<lower=-10,upper=40> beta;
+    	vector[2] b_prior;
+    }
+    model {
+    	vector[2] b_pre;
+    	matrix[2,2] sigma;
+    	
+    	//prior on alpha, beta
+    	alpha ~ normal(0,4);
+    	beta ~ normal(10,100);
+    	
+    	sigma[1,1] <- 4;
+    	sigma[2,2] <- 100;
+    	sigma[1,2] <- 10;
+    	sigma[2,1] <- 10;
+    	
+    	b_pre[1] <- alpha;
+    	b_pre[2] <- beta;
+    	b_prior ~ multi_normal(b_pre,sigma);
+    	
+    	// posterior
+    	y_trials ~ bernoulli_logit(b_prior[1] + b_prior[2] * x_trials);
+    }
+
+The simulation of the prior distribution paramters is shown below. It is evident that these parameters are slightly positively correlated and centered around their pior means. This simulation has more noise than the method conducted in the book. 
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center'}
+readRDS('priorPlot.rds')
+```
+
+\pagebreak
+
+### B. Compare inferences to those obtained in the book
+
+The sampled posterior of LD50 is shown below. This distribution is similar to the one generated form the flat prior, but has a tighter variance. Likewise, dependable inferences couldn't be made from this estimation because the range goes beyond 0, implying the dose-response relation is negative.
+
+```{r,echo=F,fig.height=3,fig.width=4,fig.align='center'}
+readRDS('ld50Plot.rds')
+```
+
+However, this analysis shows that the posterior of beta, the increase in response from increased dosage, is above zero. This result implies that the drug is almost certainly harmful, aligning with the inference in the book. 
+
+```{r,echo=F,message=F,fig.height=3,fig.width=4,fig.align='center'}
+readRDS('betaPlot.rds')
+```
+
+\pagebreak
+
+## Appendix: Code
+
+```{r,eval=F}
+setwd('~/Desktop/school/bayesian-data-analysis/hw2')
+
+library(rstan)
+library(ggplot2)
+library(dplyr)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+data <- read.table("http://www.stat.columbia.edu/~gelman/bda.course/electric.txt",skip=2)
+names(data) <- c("city","grade","ePre","ePost","cPre","cPost","replace.suppliment")
+
+
+
+
+# this takes a subset of the original data and simulates the stan model
+runStan <- function(df,plotTitle){
+
+  # unpack df columns
+  for(i in 1:ncol(df)){
+    assign(colnames(df)[i],df[,i])
+  }
+  
+  N <- nrow(df)
+  
+  fit <- stan(file="model1_try2.stan",
+              data=c("cPost","cPre","ePost","ePre","N"),chains=4,iter=100)
+  saveRDS(fit,paste0(gsub(" ","",plotTitle),".rds"))
+
+  paramsTry2 <- extract(fit)
+  
+  tdiff <- paramsTry2$tdiff
+  dim(tdiff)<-NULL
+  names(tdiff) <- gsub(" ","",plotTitle)
+  
+  plot <- ggplot(data=as.data.frame(tdiff)) + 
+    geom_histogram(binwidth=1,aes(x=tdiff)) +
+    ggtitle(plotTitle)
+  
+  stats <- list(interval=quantile(paramsTry2$tdiff,c(.25,.975)),
+                mean=mean(paramsTry2$tdiff),
+                plot=plot,
+                data=tdiff)
+  return(stats)
+}
+
+# test on everything
+stats <- runStan(data,"All Students")
+
+# subset interesting segements
+grades        <- lapply(unique(data$grade), function(x) subset(data,grade==x))
+cities        <- lapply(unique(data$city ), function(x) subset(data,city==x))
+names(grades) <- paste0("grade",unique(data$grade))
+names(cities) <- paste0("city", unique(data$city))
+
+# run stan model on all subsets
+allSubsets    <- c(grades,cities)
+allResults    <- lapply(seq_along(allSubsets),function(i) 
+  runStan(allSubsets[[i]],names(allSubsets)[i]))
+names(allResults) <- names(allSubsets)
+
+# add total average effect
+allResults$allStudents <- stats
+
+# plot distribution of all posteriors
+dataResults <- lapply(seq_along(allResults),function(i) 
+  data.frame(subset=names(allResults)[i],
+             tdiff=allResults[[i]]$data) )
+dataResults <- do.call('rbind',dataResults)
+
+facetPlot <- ggplot(data=dataResults,aes(tdiff)) + 
+  geom_histogram(binwidth=1) +
+  facet_wrap(~ subset) +
+  ggtitle("Effect of Test Controlling for Interesting Factors\nPosterior Simulation")
+saveRDS(facetPlot,"facetPlot.rds")
+
+# all posterior means & 95% quantiles
+summaryStats <- lapply(seq_along(allResults),function(i) 
+  data.frame(subset=names(allResults)[i],
+             mean=allResults[[i]]$mean,
+             int025=allResults[[i]]$interval[1],
+             int975=allResults[[i]]$interval[2]) )
+summaryStats <- do.call('rbind',summaryStats)
+row.names(summaryStats) <- NULL
+saveRDS(summaryStats,"summaryStats.rds")
+
+
+# part b
+# compare discriptive stats
+summarizedGrade <- data %>% 
+  mutate(ediff=ePost-ePre,
+         cdiff=cPost-cPre,
+         tdiff=ediff-cdiff) %>%
+  group_by(grade,replace.suppliment) %>% 
+  summarise(count=n(),
+            tdiffmean = mean(tdiff),
+            tdiffse   = sd(tdiff)/sqrt(n()),
+            tdiffLower= tdiffmean + qt(.975,n()-1)*tdiffse,
+            tdiffUpper= tdiffmean - qt(.975,n()-1)*tdiffse)
+summarizedGrade
+
+summarizedCity <- data %>% 
+  mutate(ediff=ePost-ePre,
+         cdiff=cPost-cPre,
+         tdiff=ediff-cdiff) %>%
+  group_by(city,replace.suppliment) %>% 
+  summarise(count=n(),
+            tdiffmean = mean(tdiff),
+            tdiffse   = sd(tdiff)/sqrt(n()),
+            tdiffLower= tdiffmean + qt(.975,n()-1)*tdiffse,
+            tdiffUpper= tdiffmean - qt(.975,n()-1)*tdiffse)
+summarizedCity
+
+suppliment <-  data %>% 
+  group_by(replace.suppliment) %>% 
+  summarize(count=n(),
+            tdiffmean = mean(tdiff),
+            tdiffse   = sd(tdiff)/sqrt(n()),
+            tdiffLower= tdiffmean + qt(.975,n()-1)*tdiffse,
+            tdiffUpper= tdiffmean - qt(.975,n()-1)*tdiffse)
+kable(suppliment)
+
+##########
+# part 2
+#########
+
+# make data for logistic regression from Table 3.1
+x    <- c(-0.86,-0.30,-0.05,0.73)
+n    <- c( 5,5,5,5)
+y    <- c( 0,1,3,5)
+x_trials <- sort(rep(x,5))
+y_trials <- unlist(lapply(y,function(x) c(rep(0,5-x),rep(1,x))))
+J        <- length(x_trials)
+
+# fit stan model to plot prior simulation
+fit <- stan(file="model2pre.stan",
+            data=c("x_trials","y_trials","J"),chains=4,iter=1000)
+saveRDS(fit,'model2.rds')
+
+# post processing
+fitPrior             <- readRDS('model2.rds')
+simsPrior            <- extract(fitPrior)
+simsPlotPrior        <- as.data.frame(simsPrior$b_temp)
+names(simsPlotPrior) <- c('alpha','beta')
+
+# visualition of prior simulation
+priorPlot <- ggplot(data=simsPlotPrior,aes(x=alpha,y=beta)) + 
+  geom_point() + 
+  ggtitle("Prior simulation of\nLogistic Regression Parameters")
+saveRDS(priorPlot,"priorPlot.rds")
+cor(simsPlotPrior$alpha,simsPlotPrior$beta)
+
+
+# Tune posterior on logistic regression model
+fit <- stan(file="model2post.stan",data=c("x_trials","y_trials","J"),chains=4,iter=1000)
+saveRDS(fit,'model2_post.rds')
+
+# post process
+fit <- readRDS('model2_post.rds')
+sims <- extract(fit)
+simsPlot <- as.data.frame(sims$b_prior)
+names(simsPlot) <- c('alpha_post','beta_post')
+
+# compute expected LD50
+simsPlot <- within(simsPlot,LD50 <- -alpha_post/beta_post)
+
+# posterior distribution plot of LD50
+# note: similar to results found in book
+ld50Plot <- ggplot(data=simsPlot,aes(x=LD50)) + 
+  geom_histogram(binwidth=.02) +
+  xlim(-.5,.4) + 
+  ggtitle("Posterior Simulation\nof LD50")
+saveRDS(ld50Plot,'ld50Plot.rds')
+mean(simsPlot$LD50)
+
+# posterior distribution of beta.
+# note: all > 0 indicating increase in dosage -> increase in death likelihood
+betaPlot <- ggplot(data=simsPlot,aes(x=beta_post)) + 
+  geom_histogram() + 
+  ggtitle("Posterior Simulation\nBeta, the effect of Dosage")
+saveRDS(betaPlot,"betaPlot.rds")
+```
