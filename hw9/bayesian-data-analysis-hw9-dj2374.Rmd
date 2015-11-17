@@ -1,0 +1,123 @@
+---
+title: "Bayesian Data Analysis HW9"
+author: "Devin Jones dj2374"
+date: "November 8, 2015"
+output: pdf_document
+header-includes: \usepackage{graphicx}
+---
+
+## 1. Analysis of bacteria culture treatment
+
+### A. Which of these two analyses should the researcher do? Explain your answer in two or three sentences. 
+
+The researcher should use the second method where each dish is treated as independent. This approach accounts for any dish effects. The low sample can be addressed using Monte Carlo simulation to achieve a reasonable effective sample size. 
+
+### B. Write a model that you might use for a Bayesian analysis of this problem. 
+
+One approach to this problem would be a heirarchical model using dish effects and a treatment effect. We can consider the treatment effect $\eta$ as an unconstrained hyperparameter, and the prior on the dish effect could also be normally distributed on $\eta$ under the presence of a treatment $\theta_i \sim N(\eta x,\sigma_i)$ for each of the 5 dishes where x represents the presence of treatment. Under these parameters, the likelihood model for growth of cell structures $y$ is $y_i \sim N(\theta_i,\sigma_i)$.
+
+
+## 2. In the example of binary outcomes on page 147, it is assumed that the number of measurements, n, is fixed in advance, and so the hypothetical replications under the binomial model are performed with n = 20. Suppose instead that the protocol for measurement is to stop once 13 zeros have appeared. 
+
+### A. Explain why the posterior distribution of the parameter $\theta$ under the assumed model does not change.
+
+The posterior distribution of $\theta$ under the original model is the product of the data likelihood $y \sim Binomial(n,\theta)$ and the prior on $\theta$ as $\theta \sim Beta(8,14)$.
+
+Under the new assumptions, the likelihood model changes to a negative binomial distribution $y \sim NegBinom(13,p)$ and the prior on $\theta$ is unchanged. Thus we only have to show that the likelihood model does not change under the new assumptions to prove that the posterior distribution is equivalent.  With $n=20$, the likelihood model is equivalent under each assumption with n = 20 and y=13 as parameters for the binomial distribution and r = 13 as a parameter for the negative binomial distribution. 
+
+The binomial pdf:
+$$y \sim Binom(n,\theta) \propto \theta^{\Sigma y}(1-\theta)^{n-\Sigma y}$$
+if n = 20 and $\Sigma y = 7$ we have
+$$y \sim Binomial(20,\theta) \propto \theta^{7}(1-\theta)^{13}$$
+
+The negative binomial pdf, where we observe y successes until we see r failures:
+$$y \sim NegBinom(r,\theta) \propto \theta^{\Sigma y}(1-\theta)^{r}$$
+if r=13 and $\Sigma y=7$,
+$$y \sim NegBinom(13,\theta) \propto \theta^{7}(1-\theta)^{13}$$
+
+### Perform a posterior predictive check, using the same test quantity, T = number of switches, but simulating the replications yrep under the new measurement protocol. Display the predictive simulations, T(yrep), and discuss how they differ from Figure 6.5. 
+
+The posterior predictive checks using a negative binomial simulation are shown below. A reference line is shown at the observed number of switches in the data, x=3. 
+
+In comparison to Figure 6.5, the posterior predictive distribution of the number of switches is wider, which makes sense because n is now a random variable. Additionally it seems that T, the number of switches, is more likely to be even, especially for low values of T, which seems to be due to this data collection rule.  
+
+```{r,echo=F,fig.height=4,fig.width=4,fig.align='center',message=F}
+readRDS("switchesPlot.rds")
+```
+
+
+## 3.  In Section 7.4 we discuss Bayes factors for comparing two extreme models for the 8 schools example. 
+
+### A. Derive the Bayes factor, $p(H_2|y)/p(H_1|y)$, as a function of $y_1, . . . , y_J , \theta_1, . . . , \theta_J$ , and $A$, for the models with $N(0,A^2)$ prior distributions.
+
+
+
+$$H_1: p(y|\theta_1,...,\theta_J) = \prod_{j=1}^{J}N(y_j|\theta_j, \sigma^2_j),p(\theta_1,...\theta_J)\propto 1$$
+
+$$H_2: p(y|\theta_1,...,\theta_J) = \prod_{j=1}^{J}N(y_j|\theta_j, \sigma^2_j),\theta_1=...=\theta_J=\theta,p(\theta)\propto 1$$
+
+$$Bayes Factor(H_2;H_1) = \frac{p(y|H_2)}{p(y|H_1)}=\frac{\int p(\theta_2|H_2)p(y|\theta_2,H_2)d\theta_2 }{\int p(\theta_1|H_1)p(y|\theta_1,H_1)d\theta_1}$$
+
+Suppose we replace the flat prior distributions in H1 and H2 by independent normal prior distributions, $N(0, A^2)$, for some large A. 
+
+$$BF = \frac{\int N(0,A^2)\prod_{j=1}^{J}N(y_j|\theta_{H_2}, \sigma^2_j) d\theta_{H_2}}{ \int \prod_{j=1}^{J}N(0,A^2)N(y_j|\theta_{jH_1}, \sigma^2_j) d\theta_{H_1}}$$
+
+Above expands to
+
+$$BF = \frac{\int \frac{1}{A\sqrt{2\pi} }exp\left(\frac{-\theta_{H_2}^2}{2A^2} \right)\prod_{j=1}^{J}\frac{1}{\sigma_j\sqrt{2\pi} }exp\left(\frac{-(y_j-\theta_{H_2})^2}{2\sigma_j^2} \right) d\theta_{H_2} }{\int \prod_{j=1}^{J}\frac{1}{A\sqrt{2\pi} }exp\left(\frac{-\theta_{jH_1}^2}{2A^2} \right)\frac{1}{\sigma_j\sqrt{2\pi} }exp\left(\frac{-(y_j-\theta_{jH_1})^2}{2\sigma_j^2} \right) d\theta_{H_1}}$$
+      
+$$= \frac{\int \frac{1}{A\sqrt{2\pi} }exp\left(\frac{-\theta_{H_1}^2}{2A^2} \right)\prod_{j=1}^{J}\frac{1}{\sigma_j\sqrt{2\pi} }exp\left(\frac{-(y_j-\theta_{H_2})^2}{2\sigma_j^2} \right) d\theta_{H_2}}{\int \frac{1}{(A2\pi)^J }\prod_{j=1}^{J}\frac{1}{\sigma_j }exp\left(\frac{-(y_j-\theta_{jH_1})^2}{2\sigma_j^2} +\frac{-\theta_{jH_1}^2}{2A^2}\right) d\theta_{H_1}}$$
+
+
+
+### B. Evaluate the Bayes factor in the limit of $A \rightarrow \infty$
+
+In the limit of $A \rightarrow \infty$, $H_2$ the complete pooling model gets 100% of the probability as the denominator goes to zero. 
+
+### C. For fixed A, evaluate the Bayes factor as the number of schools, J, increases. Assume for simplicity that the standard error is constant across dimensions, and that the sample mean and variance of the $y_j$’s do not change.
+
+As J increases, the Bayes Factor again favors the no pooling model. This is caused by the product of normal probability distributions in $H_2$, driving the integrand further toward zero as the dimension of $\theta$ increases. 
+
+\pagebreak
+
+## Appendix: Code
+
+```{r,eval=F}
+
+## q2: switches in binary data
+outcome <- c(1, 1, 0, 0, 0, 0, 0,1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0)
+
+# posterior predictive check
+simY <- function(){
+  # simulate y
+  theta <- rbeta(1,8,14)
+  y <- c()
+  while(sum(y==0)<13){
+    y <- c(y,rbinom(1,1,theta))
+  }
+  # count number of switches
+  T_ <- 0
+  for(i in seq_along(y)){
+    if(i==1){
+      next
+    }
+    if(y[i]!=y[i-1]){
+      T_ <- T_ + 1
+    }
+  }
+  return(T_)
+}
+
+sims <- data.frame(T_=unlist(lapply(1:10000,function(i) simY())))
+require(ggplot2)
+switchesPlot <- ggplot(sims,aes(x=T_)) + 
+  geom_histogram(binwidth=1,fill="#56B4E9") + 
+  geom_vline(xintercept=3) +
+  xlab("Number of Switches") + ylab("") +
+  ggtitle("Posterior Predictive Check\nof Number of Switches in Binary Simulation")
+saveRDS(switchesPlot,"switchesPlot.rds")
+
+freqs <- as.data.frame(table(sims$T_))
+sum(freqs[as.numeric(freqs$Var1)<=3,2])/sum(freqs$Freq)
+
+```

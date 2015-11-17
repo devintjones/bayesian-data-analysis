@@ -1,0 +1,198 @@
+---
+title: "Bayesian Data Analysis HW7"
+author: "Devin Jones dj2374"
+date: "October 26, 2015"
+output: pdf_document
+header-includes: \usepackage{graphicx}
+---
+
+## Gausian Process
+
+### A. Set up a Gaussian process model to estimate the percentage of people in the population who believe they know someone gay (in 2004), as a function of age and sex. Write the model in statistical notation (all the model, including prior distribution), and write the (unnormalized) joint posterior density.
+
+The specified data likelihood model follows a binomial logit distribution with a Gaussian Process prior on $\theta$. That is, $y_{i}$, the number of gay people that a given dimension of age and gender knows, is distributed as Binomial in $logit^{-1}\theta_{i}$, the expected proportion of people that know at least one gay person in a specified age gender subset, and $N_{i}$, the number of people in the age and gender group in the survey. 
+
+$$p(y_{i}|\theta_{i},N_{i}) \sim Binomial(N_{i},logit^{-1}\theta_{i})$$
+$$p(y_{i}|\theta_{i},N_{i}) \sim [logit^{-1}\theta_{i}]^{y_{i}}[1-logit^{-1}\theta_{i}]^{N_{i}-y_{i}}$$
+
+The prior on $\theta$ is $GP(0,k)$, which is the same as multivariate Gaussian in this case. 
+
+$$p(\theta|0, K)\sim MultiNormal(0,K)$$
+$$p(\theta|0, K)\sim \frac{1}{(2\pi)^{K/2}}\frac{1}{\sqrt{|K|}}exp\left({-\frac{1}{2}\theta^TK^{-1}\theta}\right)$$
+
+Where the covariance matrix $K$ consists of the sum of covariances over each of the predictors, age and gender group, and the product of the identity matrix and the noise variance $\sigma^2$. The squared exponential function was used as the covariance function, and $M$ is the number of age buckets.
+
+$$k_{age}(x_i,x_j) = \tau_{age}^2exp\left(-\frac{\Sigma_{k=1}^M( x_i-x_j)^2}{l_{age}^2}\right)$$
+$$k_{sex}(x_i,x_j) = \tau_{sex}^2exp\left(-\frac{( x_i-x_j)^2}{l_{sex}^2}\right)$$
+$$k(x_i,x_j) = k_{age}(x_i,x_j)  + k_{sex}(x_i,x_j)  + \sigma^2 I$$
+
+Then, the joint posterior distribution of the vector of parameters for each age and gender group $\theta \in \mathbb{R}^ D$ is
+
+$$p(\theta|y,N) \propto p(y|\theta,N) \space p(\theta|0, K)$$
+$$p(\theta|y,N) \sim \prod_{i=i}^D[logit^{-1}\theta_i]^{y_i}[1-logit^{-1}\theta_i]^{N_i-y_i} \space \frac{1}{(2\pi)^{D/2}}\frac{1}{\sqrt{|K|}}e^{-\frac{1}{2}\theta^TK^{-1}\theta}$$
+
+\pagebreak
+
+## B. Program the log of the unnormalized joint posterior density as an R function. 
+
+The data exists at the respondent level. When computing the log posterior, the covaraince matrix must be inverted which is $O(n^3)$. The respondent level data can be aggregated for faster processing, reducing the dimension of the covariance matrix from 25,825 to 32. This aggregation is demonstrated below. 
+
+```{r,message=F}
+setwd("~/Desktop/school/bayesian-data-analysis/hw7")
+
+survey <- read.csv("http://www.stat.columbia.edu/~gelman/bda.course/naes04.csv")
+
+# bucket ages into 5 year bands
+survey <- within(survey, ageGroups <- 5*round(survey$age/5))
+
+# select subset of columns, clean of missing data
+modelData <- survey[,c('ageGroups','gender','gayKnowSomeone')]
+modelData <- modelData[complete.cases(modelData),]
+
+# aggregate over interesting dimensions to find binomial distirubtion
+library(dplyr)
+aggData <- modelData %>% 
+  group_by(ageGroups,gender) %>%
+  summarize(numKnown=sum(gayKnowSomeone=='Yes'),
+            total=length(gender),
+            prop=numKnown/total)
+```
+
+
+
+Next, the coveriance matrix K is computed using a squared exponential over both age and gender. 
+
+```{r}
+# GP of % people who know a gay person by age and gender
+# model: y(x) = f_age(x) + f_gender(x) + eps
+makeK <- function(ageGroups,gender,sigma2=.1){
+  # f_age(x) ~ GP(0,k1)  
+  k1 <- function(x,x_prime,tau=1,l=1){
+    tau**2 * exp(-(x-x_prime)**2/l**2)
+  }
+  # f_gender(x) ~ GP(0,k1)
+  k2 <- function(x,x_prime,tau=1,l=1){
+    tau**2 * exp(-(x-x_prime)**2/l**2)
+  }
+  # now iterate over all data points
+  N <- length(gender)
+  K <- matrix(nrow=N,ncol=N)
+  for(i in 1:N){
+    for(j in 1:N){
+      K[i,j] <- k1(ageGroups[i],ageGroups[j]) + k2(gender[i],gender[j]) + ifelse(i==j,.1,0)
+    }
+  }
+  K
+}
+
+gender    <- ifelse(aggData$gender=="Male",1,0)
+K <- makeK(aggData$ageGroups,gender)
+```
+
+\pagebreak
+
+Finally, the log posterior formulation can be computed the sum of the binomial distributions over each age and gender group and the log multivariate pdf at $\theta$. Additive constants were removed from the formulation as they would not impact an optimization based on this gradient.
+
+```{r}
+# log posterior density
+library(boot)
+log.post <- function(theta,y,N,K){
+  # log binomial
+  sum(log(mapply(dbinom,x=y,size=N,prob=inv.logit(theta)))) +
+    # log multivariate normal pdf
+    -.5*t(theta)%*%solve(K)%*%theta
+}
+
+# test
+log.post(rnorm(length(gender)),aggData$numKnown,aggData$total,K)
+
+```
+
+\pagebreak
+
+## C. Fit the model using Stan.
+
+The Stan model gp.stan is shown below. The model consists of a mutlivariate prior on $\theta$ and a binomial logit distribution for each age and gender group on the number people who know someone gay as a function of $\theta$ and the number of people who took the survey. The covariance matrix is computed in Stan in the same fashion shown above in R. 
+
+```{r,eval=F}
+data{
+  int N;
+  int M;
+  int<lower=0, upper=1> gender[N];
+  int<lower=0> numKnown[N];
+  int<lower=0> total[N];
+  real age[N];
+}
+transformed data{
+  cov_matrix[N] sigma;
+  vector[N] mu;
+  real sq_diff;
+  for(i in 1:N) mu[i] <- 0;
+  for(i in 1:N){
+    for(j in 1:N){
+      sigma[i,j] <- exp(-pow(age[i]-age[j],2)) + 
+                      exp(-pow(gender[i]-gender[j],2)) + 
+                      if_else(i==j,0.1,0.0);
+    }
+  }
+}
+parameters{
+  vector[N] theta;
+}
+model{
+  theta ~ multi_normal(mu,sigma);
+  for(i in 1:N)
+    numKnown[i] ~ binomial_logit(total[i],theta[i]);
+}
+generated quantities{
+  vector[N] prob;
+  for(i in 1:N)
+    prob[i] <- inv_logit(theta[i]);
+}
+
+```
+
+\pagebreak
+
+## D. Graph your inference (including posterior uncertainty) along with the data.
+
+The observed proportion of people who know someone gay is plotted below in blue, and the posterior mean of the same metric is plotted in black along with a 95% interval. A few notes on this visualziation: First, all observed proportions are captured by the 95% interval of the posterior sample. This suggests that the model describes the data well. 
+
+Secondly, relationships across dimensions are clearly observed in this visualization. People younger than 60 are more likely to know someone gay, and males seem to know a gay person less frequently. This fact was more apparent in another attempt at framing this model where the covariance matrix was computed using categorical age groups, implying the same distance or difference across all age groups equally. In this categorical age group model, the posterior interval did not capture the observed mean in all cases. 
+
+Finally, subsets with low sample size are relatively uncertain. The survery captured less than 15 observations for males and females 95 years old.
+
+```{r,message=F,echo=F}
+library(ggplot2)
+library(reshape2)
+library(rstan)
+
+probs     <- extract(readRDS('fit1.rds'))$prob
+estMean   <- colMeans(probs)
+intervals <- do.call("rbind",(lapply(1:ncol(probs),function(x) quantile(probs[,x],c(.025,.975)))))
+colnames(intervals) <- c("lower","upper")
+
+plotData <- within(aggData,group<- paste0(gender,ageGroups))
+plotData <- cbind(plotData,intervals,estMean)
+prop <- melt(plotData,id.vars=c('gender','ageGroups'),measure.vars = c('prop'),value.name = 'observedProportion')
+lower <- melt(plotData,id.vars=c('gender','ageGroups'),measure.vars = c('lower'),value.name = 'lower')
+upper <- melt(plotData,id.vars=c('gender','ageGroups'),measure.vars = c('upper'),value.name = 'upper')
+postMean<- melt(plotData,id.vars=c('gender','ageGroups'),measure.vars = c('estMean'),value.name = 'postMean')
+
+prop$variable <- NULL
+lower$variable <- NULL
+upper$variable <- NULL
+postMean$variable <- NULL
+facetData <- merge(merge(merge(prop,lower),upper),postMean)
+
+ggplot(data=facetData,aes(x=ageGroups,y=observedProportion)) + 
+  geom_point(aes(color='Observed'),size=3) +
+  geom_point(aes(x=ageGroups,y=postMean,color='PosteriorMean')) +
+  geom_errorbar(aes(ymax=upper,ymin=lower),width=.1) +
+  facet_wrap(~gender) +
+  scale_colour_manual(name="",
+    values=c(Observed="#56B4E9", PosteriorMean="black")) +
+  theme(legend.position="bottom") +
+  xlab("Bucketed Age Group") + ylab("Expected Proportion of\nPopulation Who Know a Gay Person") +
+  ggtitle("Percentage of Population Who Believe They Know Someone Gay\nby Age and Gender")
+```
